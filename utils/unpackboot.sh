@@ -167,8 +167,10 @@ do_offset=$((s_offset+s_count))
 d_offset=$((do_offset+do_count))
 
 #kernel
-dd if=$bootimg of=kernel_tmp bs=$page_size skip=$k_offset count=$k_count 2>/dev/null
-dd if=kernel_tmp of=kernel bs=$kernel_size count=1 2>/dev/null
+if [ $kernel_size -gt 0 ]; then
+    dd if=$bootimg of=kernel_tmp bs=$page_size skip=$k_offset count=$k_count 2>/dev/null
+    dd if=kernel_tmp of=kernel bs=$kernel_size count=1 2>/dev/null
+fi
 
 #ramdisk.packed
 if [ "$VNDRBOOT" == "true" ] && [ $version -eq 4 ] && [ $vendor_ramdisk_table_size -gt 0 ]; then
@@ -178,9 +180,12 @@ if [ "$VNDRBOOT" == "true" ] && [ $version -eq 4 ] && [ $vendor_ramdisk_table_si
     dd if=$bootimg of=vendor_ramdisk_table_tmp bs=$page_size skip=$vrt_offset count=$vrt_count 2>/dev/null
     dd if=vendor_ramdisk_table_tmp of=vendor_ramdisk_table bs=$vendor_ramdisk_table_size count=1 2>/dev/null
     
-    # Extract the vendor ramdisk
+    # Extract the vendor ramdisk (always extract this first)
     dd if=$bootimg of=vendor_ramdisk_tmp bs=$page_size skip=$r_offset count=$r_count 2>/dev/null
     dd if=vendor_ramdisk_tmp of=vendor_ramdisk bs=$ramdisk_size count=1 2>/dev/null
+    
+    # Create a copy for the unpacking process
+    cp vendor_ramdisk ramdisk.packed
     
     # Extract individual ramdisk fragments if vendor_ramdisk_table_entry_num is available
     if [ $vendor_ramdisk_table_entry_num -gt 0 ]; then
@@ -191,7 +196,7 @@ if [ "$VNDRBOOT" == "true" ] && [ $version -eq 4 ] && [ $vendor_ramdisk_table_si
             entry_offset=$((i * vendor_ramdisk_table_entry_size))
             
             # Extract ramdisk size and offset from table entry
-            fragment_size=$(od -A n -D -j $((entry_offset + 0)) -N 4 vendor_ramdisk_table | sed "s/ //g")
+            fragment_size=$(od -A n -D -j $((entry_offset)) -N 4 vendor_ramdisk_table | sed "s/ //g")
             fragment_offset=$(od -A n -D -j $((entry_offset + 4)) -N 4 vendor_ramdisk_table | sed "s/ //g")
             
             # Extract ramdisk type and name
@@ -202,7 +207,7 @@ if [ "$VNDRBOOT" == "true" ] && [ $version -eq 4 ] && [ $vendor_ramdisk_table_si
             clean_name=$(echo $fragment_name | tr -dc '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')
             [ -z "$clean_name" ] && clean_name="vendor_ramdisk_fragment_$i"
             
-            # Extract this fragment from the vendor ramdisk
+            # Extract this fragment from the vendor ramdisk (make sure we're using the correct offset)
             dd if=vendor_ramdisk of=vendor_ramdisk_fragments/${clean_name}.img bs=1 skip=$fragment_offset count=$fragment_size 2>/dev/null
             
             # Record fragment info
@@ -211,8 +216,6 @@ if [ "$VNDRBOOT" == "true" ] && [ $version -eq 4 ] && [ $vendor_ramdisk_table_si
             echo "vendor_ramdisk_fragment_${i}_type=$fragment_type" >> vendor_ramdisk_table_info
             echo "vendor_ramdisk_fragment_${i}_name=$fragment_name" >> vendor_ramdisk_table_info
         done
-    else
-        cp vendor_ramdisk ramdisk.packed
     fi
 else
     # Traditional ramdisk extraction
@@ -384,40 +387,48 @@ if [ -f ramdisk.packed ]; then
         rm -f ramdisk.packed.mtk
     fi
 
-    mkdir -p ramdisk && cd ramdisk
+    # Verificamos si el archivo tiene tamaño
+    if [ -s ramdisk.packed ]; then
+        mkdir -p ramdisk && cd ramdisk
 
-    if gzip -t ../ramdisk.packed 2>/dev/null; then
-        pout "ramdisk is gzip format."
-        format=gzip
-        gzip -d -c ../ramdisk.packed | cpio -i -d -m --no-absolute-filenames 2>/dev/null
+        if gzip -t ../ramdisk.packed 2>/dev/null; then
+            pout "ramdisk is gzip format."
+            format=gzip
+            gzip -d -c ../ramdisk.packed | cpio -i -d -m --no-absolute-filenames 2>/dev/null
+            unpack_complete
+        fi
+        if lzma -t ../ramdisk.packed 2>/dev/null; then
+            pout "ramdisk is lzma format."
+            format=lzma
+            lzma -d -c ../ramdisk.packed | cpio -i -d -m --no-absolute-filenames 2>/dev/null
+            unpack_complete
+        fi
+        if xz -t ../ramdisk.packed 2>/dev/null; then
+            pout "ramdisk is xz format."
+            format=xz
+            xz -d -c ../ramdisk.packed | cpio -i -d -m --no-absolute-filenames 2>/dev/null
+            unpack_complete
+        fi
+        if lzop -t ../ramdisk.packed 2>/dev/null; then
+            pout "ramdisk is lzo format."
+            format=lzop
+            lzop -d -c ../ramdisk.packed | cpio -i -d -m --no-absolute-filenames 2>/dev/null
+            unpack_complete
+        fi
+        if lz4 -d ../ramdisk.packed 2>/dev/null | cpio -i -d -m --no-absolute-filenames 2>/dev/null; then
+            pout "ramdisk is lz4 format."
+            format=lz4
+        else
+            pout "ramdisk is unknown format, can't unpack ramdisk"
+        fi
         unpack_complete
-    fi
-    if lzma -t ../ramdisk.packed 2>/dev/null; then
-        pout "ramdisk is lzma format."
-        format=lzma
-        lzma -d -c ../ramdisk.packed | cpio -i -d -m --no-absolute-filenames 2>/dev/null
-        unpack_complete
-    fi
-    if xz -t ../ramdisk.packed 2>/dev/null; then
-        pout "ramdisk is xz format."
-        format=xz
-        xz -d -c ../ramdisk.packed | cpio -i -d -m --no-absolute-filenames 2>/dev/null
-        unpack_complete
-    fi
-    if lzop -t ../ramdisk.packed 2>/dev/null; then
-        pout "ramdisk is lzo format."
-        format=lzop
-        lzop -d -c ../ramdisk.packed | cpio -i -d -m --no-absolute-filenames 2>/dev/null
-        unpack_complete
-    fi
-    if lz4 -d ../ramdisk.packed 2>/dev/null | cpio -i -d -m --no-absolute-filenames 2>/dev/null; then
-        pout "ramdisk is lz4 format."
-        format=lz4
     else
-        pout "ramdisk is unknown format, can't unpack ramdisk"
+        pout "ramdisk.packed file is empty or missing"
+        mkdir -p ramdisk
     fi
 else
     pout "No ramdisk found to unpack"
+    mkdir -p ramdisk
 fi
 
 unpack_complete
