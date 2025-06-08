@@ -996,22 +996,38 @@ cat "${OUTDIR}"/README.md
 
 # Generate TWRP Trees
 twrpdtout="twrp-device-tree"
+
+# Mejorar detección de imágenes para TWRP
 if [[ "$is_ab" = true ]]; then
-	if [ -f recovery.img ]; then
-		printf "Legacy A/B with recovery partition detected...\n"
-		twrpimg="recovery.img"
-	else
-	twrpimg="vendor_boot.img"
-	fi
+    if [ -f recovery.img ]; then
+        printf "Legacy A/B with recovery partition detected...\n"
+        twrpimg="recovery.img"
+    elif [ -f vendor_boot.img ]; then
+        # Verificar si el header es v4
+        header_version=$(od -A n -j 44 -N 4 -t u4 vendor_boot.img 2>/dev/null | tr -d ' ')
+        if [ "$header_version" = "4" ] || [ "$header_version" = "3" ]; then
+            printf "A/B device with vendor_boot v$header_version detected...\n"
+            twrpimg="vendor_boot.img"
+        else
+            printf "A/B device detected but vendor_boot is not v3 or v4, trying boot.img...\n"
+            twrpimg="boot.img"
+        fi
+    else
+        printf "A/B device detected, using boot.img...\n"
+        twrpimg="boot.img"
+    fi
 else
-	twrpimg="recovery.img"
+    printf "Non-A/B device detected, using recovery.img...\n"
+    twrpimg="recovery.img"
 fi
+
 if [[ -f ${twrpimg} ]]; then
-	mkdir -p $twrpdtout
-	uvx --from git+https://github.com/EduardoA3677/twrpdtgen@master twrpdtgen $twrpimg -o $twrpdtout
-	if [[ "$?" = 0 ]]; then
-		[[ ! -e "${OUTDIR}"/twrp-device-tree/README.md ]] && curl https://raw.githubusercontent.com/wiki/SebaUbuntu/TWRP-device-tree-generator/4.-Build-TWRP-from-source.md > ${twrpdtout}/README.md
-	fi
+    mkdir -p $twrpdtout
+    printf "Generating TWRP device tree using %s...\n" "$twrpimg"
+    uvx --from git+https://github.com/EduardoA3677/twrpdtgen@master twrpdtgen $twrpimg -o $twrpdtout
+    if [[ "$?" = 0 ]]; then
+        [[ ! -e "${OUTDIR}"/twrp-device-tree/README.md ]] && curl https://raw.githubusercontent.com/wiki/SebaUbuntu/TWRP-device-tree-generator/4.-Build-TWRP-from-source.md > ${twrpdtout}/README.md
+    fi
 fi
 
 # Remove all .git directories from twrpdtout
