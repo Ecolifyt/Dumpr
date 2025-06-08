@@ -174,62 +174,107 @@ fi
 
 #ramdisk.packed
 if [ "$VNDRBOOT" == "true" ]; then
+    pout "  Extracting vendor_boot ramdisk (size: $ramdisk_size bytes)"
+    
     # Extract the vendor ramdisk
     dd if=$bootimg of=ramdisk_tmp bs=$page_size skip=$r_offset count=$r_count 2>/dev/null
     dd if=ramdisk_tmp of=vendor_ramdisk bs=$ramdisk_size count=1 2>/dev/null
     
-    # Create a copy for unpacking
-    cp vendor_ramdisk ramdisk.packed
+    # Debug: Verificar tamaño del vendor_ramdisk
+    vend_size=$(stat -c%s vendor_ramdisk 2>/dev/null || echo "0")
+    pout "  Extracted vendor_ramdisk size: $vend_size bytes"
     
-    # Process vendor_boot v4 additional structures
+    # Procesar versión v4 con tabla de ramdisk
     if [ $version -eq 4 ] && [ $vendor_ramdisk_table_size -gt 0 ]; then
-        # For vendor_boot v4, extract the vendor ramdisk table
+        pout "  Processing vendor_boot v4 ramdisk table"
+        
+        # Extraer la tabla de ramdisk del vendor
         vrt_offset=$((r_offset+r_count))
         vrt_count=$(((vendor_ramdisk_table_size+page_size-1)/page_size))
         dd if=$bootimg of=vendor_ramdisk_table_tmp bs=$page_size skip=$vrt_offset count=$vrt_count 2>/dev/null
         dd if=vendor_ramdisk_table_tmp of=vendor_ramdisk_table bs=$vendor_ramdisk_table_size count=1 2>/dev/null
         
-        # Extract individual ramdisk fragments if vendor_ramdisk_table_entry_num is available
+        # Debug: Verificar tamaño de la tabla
+        table_size=$(stat -c%s vendor_ramdisk_table 2>/dev/null || echo "0")
+        pout "  Extracted vendor_ramdisk_table size: $table_size bytes"
+        
+        # Por defecto, usamos el vendor_ramdisk completo como ramdisk.packed
+        cp vendor_ramdisk ramdisk.packed
+        
+        # Procesar entradas de la tabla si hay alguna
         if [ $vendor_ramdisk_table_entry_num -gt 0 ]; then
             mkdir -p vendor_ramdisk_fragments
             
-            # Process each entry in the vendor ramdisk table
+            pout "  Processing $vendor_ramdisk_table_entry_num ramdisk fragments"
+            
+            # Mostrar información de depuración sobre la tabla
+            hexdump -C -n 64 vendor_ramdisk_table
+            
+            # Procesar cada entrada en la tabla
             for ((i=0; i<vendor_ramdisk_table_entry_num; i++)); do
                 entry_offset=$((i * vendor_ramdisk_table_entry_size))
                 
-                # Extract ramdisk size and offset from table entry
+                # Extraer tamaño y offset del fragmento
                 fragment_size=$(od -A n -D -j $((entry_offset)) -N 4 vendor_ramdisk_table | sed "s/ //g")
                 fragment_offset=$(od -A n -D -j $((entry_offset + 4)) -N 4 vendor_ramdisk_table | sed "s/ //g")
                 
-                # Extract ramdisk type and name
+                # Extraer tipo y nombre del fragmento
                 fragment_type=$(od -A n -D -j $((entry_offset + 8)) -N 4 vendor_ramdisk_table | sed "s/ //g")
                 fragment_name=$(od -A n -S1 -j $((entry_offset + 12)) -N 32 vendor_ramdisk_table | tr -d '\0')
                 
-                # Create a clean fragment name for the file
+                pout "  Fragment $i: size=$fragment_size, offset=$fragment_offset, type=$fragment_type, name=$fragment_name"
+                
+                # Crear un nombre limpio para el archivo
                 clean_name=$(echo $fragment_name | tr -dc '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')
                 [ -z "$clean_name" ] && clean_name="vendor_ramdisk_fragment_$i"
                 
-                # Extract this fragment from the vendor ramdisk
-                if [ $fragment_size -gt 0 ]; then
+                # Extraer este fragmento del vendor ramdisk
+                if [ $fragment_size -gt 0 ] && [ $fragment_offset -lt $vend_size ]; then
+                    pout "  Extracting fragment $i to: $clean_name.img"
                     dd if=vendor_ramdisk of=vendor_ramdisk_fragments/${clean_name}.img bs=1 skip=$fragment_offset count=$fragment_size 2>/dev/null
-                    # If this is the first fragment, also save it as ramdisk.packed for compatibility
+                    
+                    # Si es el primer fragmento, también lo guardamos como ramdisk.packed
                     if [ $i -eq 0 ]; then
+                        pout "  Using fragment 0 as ramdisk.packed"
                         dd if=vendor_ramdisk of=ramdisk.packed bs=1 skip=$fragment_offset count=$fragment_size 2>/dev/null
                     fi
+                    
+                    # Verificar tamaño del fragmento extraído
+                    frag_size=$(stat -c%s vendor_ramdisk_fragments/${clean_name}.img 2>/dev/null || echo "0")
+                    pout "  Extracted fragment size: $frag_size bytes"
                 fi
                 
-                # Record fragment info
+                # Guardar información del fragmento
                 echo "vendor_ramdisk_fragment_${i}_size=$fragment_size" >> vendor_ramdisk_table_info
                 echo "vendor_ramdisk_fragment_${i}_offset=$fragment_offset" >> vendor_ramdisk_table_info
                 echo "vendor_ramdisk_fragment_${i}_type=$fragment_type" >> vendor_ramdisk_table_info
                 echo "vendor_ramdisk_fragment_${i}_name=$fragment_name" >> vendor_ramdisk_table_info
             done
         fi
+    else
+        # Para vendor_boot estándar, usamos todo el ramdisk
+        pout "  Using complete vendor_ramdisk as ramdisk.packed"
+        cp vendor_ramdisk ramdisk.packed
+    fi
+    
+    # Debug: Verificar tamaño del ramdisk.packed final
+    ramdisk_packed_size=$(stat -c%s ramdisk.packed 2>/dev/null || echo "0")
+    pout "  Final ramdisk.packed size: $ramdisk_packed_size bytes"
+    
+    # Si después de todo el ramdisk.packed está vacío o no existe, usar el vendor_ramdisk completo
+    if [ ! -s ramdisk.packed ] && [ -s vendor_ramdisk ]; then
+        pout "  ramdisk.packed is empty, falling back to complete vendor_ramdisk"
+        cp vendor_ramdisk ramdisk.packed
     fi
 else
-    # Traditional ramdisk extraction
+    # Extracción tradicional de ramdisk
+    pout "  Extracting standard ramdisk"
     dd if=$bootimg of=ramdisk_tmp bs=$page_size skip=$r_offset count=$r_count 2>/dev/null
     dd if=ramdisk_tmp of=ramdisk.packed bs=$ramdisk_size count=1 2>/dev/null
+    
+    # Debug: Verificar tamaño del ramdisk.packed
+    ramdisk_packed_size=$(stat -c%s ramdisk.packed 2>/dev/null || echo "0")
+    pout "  Extracted ramdisk.packed size: $ramdisk_packed_size bytes"
 fi
 
 #second
@@ -264,7 +309,7 @@ fi
 #bootconfig (for v4)
 if [ $version -eq 4 ]; then
     if [ "$VNDRBOOT" == "true" ] && [ $bootconfig_size -gt 0 ]; then
-        # For vendor_boot v4, calculate bootconfig offset after vendor ramdisk table
+        # Para vendor_boot v4, calcular offset del bootconfig después de la tabla de ramdisk
         bc_offset=$((vrt_offset+vrt_count))
         bc_count=$(((bootconfig_size+page_size-1)/page_size))
         dd if=$bootimg of=bootconfig_tmp bs=$page_size skip=$bc_offset count=$bc_count 2>/dev/null
@@ -272,7 +317,7 @@ if [ $version -eq 4 ]; then
         bc_name="bootconfig=bootconfig\n"
         bc_size="bootconfig_size=$bootconfig_size\n"
     elif [ "$VNDRBOOT" == "false" ] && [ ! -z "$boot_signature_size" ] && [ $boot_signature_size -gt 0 ]; then
-        # For boot v4, extract boot signature
+        # Para boot v4, extraer firma del boot
         bs_offset=$((r_offset+r_count))
         bs_count=$(((boot_signature_size+page_size-1)/page_size))
         dd if=$bootimg of=boot_signature_tmp bs=$page_size skip=$bs_offset count=$bs_count 2>/dev/null
@@ -421,17 +466,53 @@ if [ -f ramdisk.packed ]; then
             lzop -d -c ../ramdisk.packed | cpio -i -d -m --no-absolute-filenames 2>/dev/null
             unpack_complete
         fi
-        if lz4 -t ../ramdisk.packed 2>/dev/null; then
+        
+        # Corregido: usar lz4 -d directamente para descomprimir en lugar de solo probar
+        if lz4 -d ../ramdisk.packed 2>/dev/null | cpio -i -d -m --no-absolute-filenames 2>/dev/null; then
             pout "ramdisk is lz4 format."
             format=lz4
-            lz4 -d -c ../ramdisk.packed | cpio -i -d -m --no-absolute-filenames 2>/dev/null
             unpack_complete
         else
+            # Intentar con herramientas alternativas de lz4 si están disponibles
+            if command -v unlz4 >/dev/null 2>&1; then
+                pout "Trying alternative lz4 decompression with unlz4"
+                unlz4 -c ../ramdisk.packed 2>/dev/null | cpio -i -d -m --no-absolute-filenames 2>/dev/null
+                if [ $? -eq 0 ]; then
+                    pout "ramdisk is lz4 format (decompressed with unlz4)."
+                    format=lz4
+                    unpack_complete
+                fi
+            fi
+            
             pout "ramdisk is unknown format, can't unpack ramdisk"
+            # Mostrar los primeros bytes para diagnóstico
+            pout "First 32 bytes of ramdisk.packed:"
+            hexdump -C -n 32 ../ramdisk.packed
         fi
     else
         pout "ramdisk.packed file is empty or missing"
-        mkdir -p ramdisk
+        # Probar con una copia del vendor_ramdisk como último recurso
+        if [ "$VNDRBOOT" == "true" ] && [ -s vendor_ramdisk ]; then
+            pout "Trying with complete vendor_ramdisk as fallback"
+            cp ../vendor_ramdisk ../ramdisk.packed
+            mkdir -p ramdisk && cd ramdisk
+            
+            # Intentar todos los formatos de compresión
+            if lz4 -d ../ramdisk.packed 2>/dev/null | cpio -i -d -m --no-absolute-filenames 2>/dev/null; then
+                pout "vendor_ramdisk is lz4 format (fallback)."
+                format=lz4
+                unpack_complete
+            elif gzip -d -c ../ramdisk.packed 2>/dev/null | cpio -i -d -m --no-absolute-filenames 2>/dev/null; then
+                pout "vendor_ramdisk is gzip format (fallback)."
+                format=gzip
+                unpack_complete
+            else
+                pout "Could not unpack vendor_ramdisk as fallback"
+                mkdir -p ramdisk
+            fi
+        else
+            mkdir -p ramdisk
+        fi
     fi
 else
     pout "No ramdisk found to unpack"
