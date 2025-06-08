@@ -173,57 +173,63 @@ if [ $kernel_size -gt 0 ]; then
 fi
 
 #ramdisk.packed
-if [ "$VNDRBOOT" == "true" ] && [ $version -eq 4 ] && [ $vendor_ramdisk_table_size -gt 0 ]; then
-    # For vendor_boot v4, extract the vendor ramdisk table first
-    vrt_offset=$((r_offset+r_count))
-    vrt_count=$(((vendor_ramdisk_table_size+page_size-1)/page_size))
-    dd if=$bootimg of=vendor_ramdisk_table_tmp bs=$page_size skip=$vrt_offset count=$vrt_count 2>/dev/null
-    dd if=vendor_ramdisk_table_tmp of=vendor_ramdisk_table bs=$vendor_ramdisk_table_size count=1 2>/dev/null
+if [ "$VNDRBOOT" == "true" ]; then
+    # Extract the vendor ramdisk
+    dd if=$bootimg of=ramdisk_tmp bs=$page_size skip=$r_offset count=$r_count 2>/dev/null
+    dd if=ramdisk_tmp of=vendor_ramdisk bs=$ramdisk_size count=1 2>/dev/null
     
-    # Extract the vendor ramdisk (always extract this first)
-    dd if=$bootimg of=vendor_ramdisk_tmp bs=$page_size skip=$r_offset count=$r_count 2>/dev/null
-    dd if=vendor_ramdisk_tmp of=vendor_ramdisk bs=$ramdisk_size count=1 2>/dev/null
-    
-    # Create a copy for the unpacking process
+    # Create a copy for unpacking
     cp vendor_ramdisk ramdisk.packed
     
-    # Extract individual ramdisk fragments if vendor_ramdisk_table_entry_num is available
-    if [ $vendor_ramdisk_table_entry_num -gt 0 ]; then
-        mkdir -p vendor_ramdisk_fragments
+    # Process vendor_boot v4 additional structures
+    if [ $version -eq 4 ] && [ $vendor_ramdisk_table_size -gt 0 ]; then
+        # For vendor_boot v4, extract the vendor ramdisk table
+        vrt_offset=$((r_offset+r_count))
+        vrt_count=$(((vendor_ramdisk_table_size+page_size-1)/page_size))
+        dd if=$bootimg of=vendor_ramdisk_table_tmp bs=$page_size skip=$vrt_offset count=$vrt_count 2>/dev/null
+        dd if=vendor_ramdisk_table_tmp of=vendor_ramdisk_table bs=$vendor_ramdisk_table_size count=1 2>/dev/null
         
-        # Process each entry in the vendor ramdisk table
-        for ((i=0; i<vendor_ramdisk_table_entry_num; i++)); do
-            entry_offset=$((i * vendor_ramdisk_table_entry_size))
+        # Extract individual ramdisk fragments if vendor_ramdisk_table_entry_num is available
+        if [ $vendor_ramdisk_table_entry_num -gt 0 ]; then
+            mkdir -p vendor_ramdisk_fragments
             
-            # Extract ramdisk size and offset from table entry
-            fragment_size=$(od -A n -D -j $((entry_offset)) -N 4 vendor_ramdisk_table | sed "s/ //g")
-            fragment_offset=$(od -A n -D -j $((entry_offset + 4)) -N 4 vendor_ramdisk_table | sed "s/ //g")
-            
-            # Extract ramdisk type and name
-            fragment_type=$(od -A n -D -j $((entry_offset + 8)) -N 4 vendor_ramdisk_table | sed "s/ //g")
-            fragment_name=$(od -A n -S1 -j $((entry_offset + 12)) -N 32 vendor_ramdisk_table | tr -d '\0')
-            
-            # Create a clean fragment name for the file
-            clean_name=$(echo $fragment_name | tr -dc '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')
-            [ -z "$clean_name" ] && clean_name="vendor_ramdisk_fragment_$i"
-            
-            # Extract this fragment from the vendor ramdisk (make sure we're using the correct offset)
-            dd if=vendor_ramdisk of=vendor_ramdisk_fragments/${clean_name}.img bs=1 skip=$fragment_offset count=$fragment_size 2>/dev/null
-            
-            # Record fragment info
-            echo "vendor_ramdisk_fragment_${i}_size=$fragment_size" >> vendor_ramdisk_table_info
-            echo "vendor_ramdisk_fragment_${i}_offset=$fragment_offset" >> vendor_ramdisk_table_info
-            echo "vendor_ramdisk_fragment_${i}_type=$fragment_type" >> vendor_ramdisk_table_info
-            echo "vendor_ramdisk_fragment_${i}_name=$fragment_name" >> vendor_ramdisk_table_info
-        done
+            # Process each entry in the vendor ramdisk table
+            for ((i=0; i<vendor_ramdisk_table_entry_num; i++)); do
+                entry_offset=$((i * vendor_ramdisk_table_entry_size))
+                
+                # Extract ramdisk size and offset from table entry
+                fragment_size=$(od -A n -D -j $((entry_offset)) -N 4 vendor_ramdisk_table | sed "s/ //g")
+                fragment_offset=$(od -A n -D -j $((entry_offset + 4)) -N 4 vendor_ramdisk_table | sed "s/ //g")
+                
+                # Extract ramdisk type and name
+                fragment_type=$(od -A n -D -j $((entry_offset + 8)) -N 4 vendor_ramdisk_table | sed "s/ //g")
+                fragment_name=$(od -A n -S1 -j $((entry_offset + 12)) -N 32 vendor_ramdisk_table | tr -d '\0')
+                
+                # Create a clean fragment name for the file
+                clean_name=$(echo $fragment_name | tr -dc '[:alnum:]_-' | tr '[:upper:]' '[:lower:]')
+                [ -z "$clean_name" ] && clean_name="vendor_ramdisk_fragment_$i"
+                
+                # Extract this fragment from the vendor ramdisk
+                if [ $fragment_size -gt 0 ]; then
+                    dd if=vendor_ramdisk of=vendor_ramdisk_fragments/${clean_name}.img bs=1 skip=$fragment_offset count=$fragment_size 2>/dev/null
+                    # If this is the first fragment, also save it as ramdisk.packed for compatibility
+                    if [ $i -eq 0 ]; then
+                        dd if=vendor_ramdisk of=ramdisk.packed bs=1 skip=$fragment_offset count=$fragment_size 2>/dev/null
+                    fi
+                fi
+                
+                # Record fragment info
+                echo "vendor_ramdisk_fragment_${i}_size=$fragment_size" >> vendor_ramdisk_table_info
+                echo "vendor_ramdisk_fragment_${i}_offset=$fragment_offset" >> vendor_ramdisk_table_info
+                echo "vendor_ramdisk_fragment_${i}_type=$fragment_type" >> vendor_ramdisk_table_info
+                echo "vendor_ramdisk_fragment_${i}_name=$fragment_name" >> vendor_ramdisk_table_info
+            done
+        fi
     fi
 else
     # Traditional ramdisk extraction
     dd if=$bootimg of=ramdisk_tmp bs=$page_size skip=$r_offset count=$r_count 2>/dev/null
     dd if=ramdisk_tmp of=ramdisk.packed bs=$ramdisk_size count=1 2>/dev/null
-    
-    # For vendor_boot, create a copy named vendor_ramdisk
-    [ "$VNDRBOOT" == "true" ] && cp ramdisk.packed vendor_ramdisk
 fi
 
 #second
@@ -371,8 +377,8 @@ fi
 # MTK ramdisk (MTK Header Size 512, MAGIC 0x58881688)
 if [ -f ramdisk.packed ]; then
     mtk_header_magic="58881688"
-    ramdisk_packed_header=$(od -A n -X -j 0 -N 4 ramdisk.packed | sed 's/ //g')
-    if [ $ramdisk_packed_header = $mtk_header_magic ]; then
+    ramdisk_packed_header=$(od -A n -X -j 0 -N 4 ramdisk.packed 2>/dev/null | sed 's/ //g')
+    if [ "$ramdisk_packed_header" = "$mtk_header_magic" ]; then
         mv ramdisk.packed ramdisk.packed.mtk
         dd if=ramdisk.packed.mtk of=ramdisk.packed ibs=512 skip=1 2>/dev/null
         dd if=ramdisk.packed.mtk of=ramdisk.mtk_header bs=512 count=1 2>/dev/null
@@ -418,10 +424,10 @@ if [ -f ramdisk.packed ]; then
         if lz4 -d ../ramdisk.packed 2>/dev/null | cpio -i -d -m --no-absolute-filenames 2>/dev/null; then
             pout "ramdisk is lz4 format."
             format=lz4
+            unpack_complete
         else
             pout "ramdisk is unknown format, can't unpack ramdisk"
         fi
-        unpack_complete
     else
         pout "ramdisk.packed file is empty or missing"
         mkdir -p ramdisk
