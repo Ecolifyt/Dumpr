@@ -424,6 +424,7 @@ if [ -f ramdisk.packed ]; then
         if lz4 -d ../ramdisk.packed 2>/dev/null | cpio -i -d -m --no-absolute-filenames 2>/dev/null; then
             pout "ramdisk is lz4 format."
             format=lz4
+            lz4 -d ../ramdisk.packed 2>/dev/null | cpio -i -d -m --no-absolute-filenames 2>/dev/null
             unpack_complete
         else
             pout "ramdisk is unknown format, can't unpack ramdisk"
