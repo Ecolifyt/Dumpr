@@ -421,10 +421,10 @@ if [ -f ramdisk.packed ]; then
             lzop -d -c ../ramdisk.packed | cpio -i -d -m --no-absolute-filenames 2>/dev/null
             unpack_complete
         fi
-        if lz4 -d ../ramdisk.packed 2>/dev/null | cpio -i -d -m --no-absolute-filenames 2>/dev/null; then
+        if lz4 -t ../ramdisk.packed 2>/dev/null; then
             pout "ramdisk is lz4 format."
             format=lz4
-            lz4 -d ../ramdisk.packed 2>/dev/null | cpio -i -d -m --no-absolute-filenames 2>/dev/null
+            lz4 -d -c ../ramdisk.packed | cpio -i -d -m --no-absolute-filenames 2>/dev/null
             unpack_complete
         else
             pout "ramdisk is unknown format, can't unpack ramdisk"
