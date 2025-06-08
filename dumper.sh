@@ -1003,9 +1003,10 @@ if [[ "$is_ab" = true ]]; then
         printf "Legacy A/B with recovery partition detected...\n"
         twrpimg="recovery.img"
     elif [ -f vendor_boot.img ]; then
-        # Usar nuestra función mejorada para detectar la versión
-        header_version=$(od -An -t u4 -N 4 -j 44 vendor_boot.img | tr -d ' ')
-	echo "$header_version" 
+        # Leer solo 1 byte en formato hexadecimal
+        header_version=$(od -An -N1 -j44 -t u1 vendor_boot.img | tr -d ' ')
+        echo "$header_version"
+
         printf "Detected vendor_boot.img with header version: %s\n" "$header_version"
         
         if [[ "$header_version" == "4" || "$header_version" == "3" ]]; then
@@ -1013,7 +1014,6 @@ if [[ "$is_ab" = true ]]; then
             
             # Guardar la versión correcta en el archivo para que AIK lo use
             echo "$header_version" > vendor_boot.img-header_version
-            
             twrpimg="vendor_boot.img"
         else
             printf "A/B device detected but vendor_boot header version not recognized, trying boot.img...\n"
