@@ -1002,17 +1002,26 @@ if [[ "$is_ab" = true ]]; then
         printf "Legacy A/B with recovery partition detected...\n"
         twrpimg="recovery.img"
     elif [ -f vendor_boot.img ]; then
-        # Verificar el header version usando dd y od para mayor precisión
+        # Método más confiable para detectar la versión de header
+        # Usar dd para extraer los bytes exactos y od para convertirlos a un número decimal
         header_version=$(dd if=vendor_boot.img bs=1 skip=44 count=4 2>/dev/null | od -An -t d4 | tr -d ' ')
         printf "Detected vendor_boot.img with header version: %s\n" "$header_version"
+        
+        # Verificar también el log de AIK si ya fue extraído
+        if [ -f vendor_boot.extracted ]; then
+            if grep -q "Processing vendor_boot v4 ramdisk table" vendor_boot.extracted; then
+                printf "AIK confirms vendor_boot v4 detected, overriding header version\n"
+                header_version="4"
+            fi
+        fi
         
         if [[ "$header_version" == "4" || "$header_version" == "3" ]]; then
             printf "A/B device with vendor_boot v%s detected, using vendor_boot.img...\n" "$header_version"
             twrpimg="vendor_boot.img"
         else
-            # Forzar el uso de vendor_boot.img si AIK confirma que es v4
-            if grep -q "Processing vendor_boot v4 ramdisk table" vendor_boot.extracted; then
-                printf "AIK detected vendor_boot v4, using vendor_boot.img...\n"
+            # Como último recurso, verificar los primeros bytes para ver si hay evidencia de un header v4
+            if xxd -p -l 8 vendor_boot.img | grep -q "41564233"; then
+                printf "Magic AVB3 detected, likely vendor_boot v4, using vendor_boot.img...\n"
                 twrpimg="vendor_boot.img"
             else
                 printf "A/B device detected but vendor_boot is not v3 or v4, trying boot.img...\n"
