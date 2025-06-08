@@ -994,7 +994,6 @@ manufacturer=$(echo "${manufacturer}" | tr '[:upper:]' '[:lower:]' | tr -dc '[:p
 printf "## %s\n- Manufacturer: %s\n- Platform: %s\n- Codename: %s\n- Brand: %s\n- Flavor: %s\n- Release Version: %s\n- Kernel Version: %s\n- Id: %s\n- Incremental: %s\n- Tags: %s\n- CPU Abilist: %s\n- A/B Device: %s\n- Treble Device: %s\n- Locale: %s\n- Screen Density: %s\n- Fingerprint: %s\n- OTA version: %s\n- Branch: %s\n- Repo: %s\n" "${description}" "${manufacturer}" "${platform}" "${codename}" "${brand}" "${flavor}" "${release}" "${kernel_version}" "${id}" "${incremental}" "${tags}" "${abilist}" "${is_ab}" "${treble_support}" "${locale}" "${density}" "${fingerprint}" "${otaver}" "${branch}" "${repo}" > "${OUTDIR}"/README.md
 cat "${OUTDIR}"/README.md
 
-# Generate TWRP Trees
 twrpdtout="twrp-device-tree"
 
 # Mejorar detección de imágenes para TWRP
@@ -1003,10 +1002,12 @@ if [[ "$is_ab" = true ]]; then
         printf "Legacy A/B with recovery partition detected...\n"
         twrpimg="recovery.img"
     elif [ -f vendor_boot.img ]; then
-        # Verificar si el header es v4
-        header_version=$(od -A n -j 44 -N 4 -t u4 vendor_boot.img 2>/dev/null | tr -d ' ')
-        if [ "$header_version" = "4" ] || [ "$header_version" = "3" ]; then
-            printf "A/B device with vendor_boot v$header_version detected...\n"
+        # Mejora en la detección del header version usando hexdump directo
+        header_version=$(hexdump -n 48 -s 44 -e '1/4 "%d"' vendor_boot.img 2>/dev/null)
+        printf "Detected vendor_boot.img with header version: %s\n" "$header_version"
+        
+        if [[ "$header_version" == "4" || "$header_version" == "3" ]]; then
+            printf "A/B device with vendor_boot v%s detected, using vendor_boot.img...\n" "$header_version"
             twrpimg="vendor_boot.img"
         else
             printf "A/B device detected but vendor_boot is not v3 or v4, trying boot.img...\n"
@@ -1024,9 +1025,12 @@ fi
 if [[ -f ${twrpimg} ]]; then
     mkdir -p $twrpdtout
     printf "Generating TWRP device tree using %s...\n" "$twrpimg"
+    
+    # Mantener tu fork como solicitaste
     uvx --from git+https://github.com/EduardoA3677/twrpdtgen@master twrpdtgen $twrpimg -o $twrpdtout
+    
     if [[ "$?" = 0 ]]; then
-        [[ ! -e "${OUTDIR}"/twrp-device-tree/README.md ]] && curl https://raw.githubusercontent.com/wiki/SebaUbuntu/TWRP-device-tree-generator/4.-Build-TWRP-from-source.md > ${twrpdtout}/README.md
+        [[ ! -e "${OUTDIR}"/twrp-device-tree/README.md ]] && curl https://raw.githubusercontent.com/wiki/EduardoA3677/TWRP-device-tree-generator/4.-Build-TWRP-from-source.md > ${twrpdtout}/README.md
     fi
 fi
 
