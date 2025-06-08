@@ -896,7 +896,7 @@ if [[ ! $(find "$(pwd)"/system "$(pwd)"/system/system "$(pwd)"/vendor "$(pwd)"/*
 fi
 
 # Define all possible build.prop locations to search
-BUILD_PROP_LOCATIONS="{system,system/system,vendor,product,odm,my_product,my_stock,my_preload,my_bigball,my_manifest,my_company,my_carrier,my_region,my_heytap,my_custom,my_version,oppo_product,oem,system_ext}"
+BUILD_PROP_LOCATIONS="{system,system/system,vendor,product}"
 
 flavor=$(grep -m1 -oP "(?<=^ro.build.flavor=).*" -hs $BUILD_PROP_LOCATIONS/build*.prop)
 [[ -z "${flavor}" ]] && flavor=$(grep -m1 -oP "(?<=^ro.vendor.build.flavor=).*" -hs vendor/build*.prop)
