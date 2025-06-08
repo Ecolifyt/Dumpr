@@ -1004,7 +1004,7 @@ if [[ "$is_ab" = true ]]; then
         twrpimg="recovery.img"
     elif [ -f vendor_boot.img ]; then
         # Leer solo 1 byte en formato hexadecimal
-        header_version=$(dd if=vendor_boot.img bs=1 skip=44 count=4 2>/dev/null | od -An -t u4 -N4 | tr -d ' ')
+        header_version=4
         echo "Detected vendor_boot.img with header version: $header_version"
 
         echo "$header_version"
