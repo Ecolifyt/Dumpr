@@ -1001,7 +1001,7 @@ if [[ "$is_ab" = true ]]; then
 		printf "Legacy A/B with recovery partition detected...\n"
 		twrpimg="recovery.img"
 	else
-	twrpimg="boot.img"
+	twrpimg="vendor_boot.img"
 	fi
 else
 	twrpimg="recovery.img"
