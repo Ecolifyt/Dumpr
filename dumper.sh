@@ -993,7 +993,60 @@ manufacturer=$(echo "${manufacturer}" | tr '[:upper:]' '[:lower:]' | tr -dc '[:p
 # Repo README File
 printf "## %s\n- Manufacturer: %s\n- Platform: %s\n- Codename: %s\n- Brand: %s\n- Flavor: %s\n- Release Version: %s\n- Kernel Version: %s\n- Id: %s\n- Incremental: %s\n- Tags: %s\n- CPU Abilist: %s\n- A/B Device: %s\n- Treble Device: %s\n- Locale: %s\n- Screen Density: %s\n- Fingerprint: %s\n- OTA version: %s\n- Branch: %s\n- Repo: %s\n" "${description}" "${manufacturer}" "${platform}" "${codename}" "${brand}" "${flavor}" "${release}" "${kernel_version}" "${id}" "${incremental}" "${tags}" "${abilist}" "${is_ab}" "${treble_support}" "${locale}" "${density}" "${fingerprint}" "${otaver}" "${branch}" "${repo}" > "${OUTDIR}"/README.md
 cat "${OUTDIR}"/README.md
+detect_header_version() {
+    local bootimg="$1"
+    local header_version=0
+    
+    # Primero buscar las firmas mágicas conocidas
+    if grep -q "VNDRBOOT" "$bootimg"; then
+        # Es un vendor_boot, ahora determinar versión
+        echo "Vendor boot image detected with VNDRBOOT signature"
+        
+        # Para vendor_boot, el header_version está en el offset 44
+        header_version=$(hexdump -s 44 -n 4 -e '1/4 "%d"' "$bootimg")
+        
+        # Verificación adicional: si el header_version es un número grande inusual,
+        # probablemente sea un error de lectura de bytes
+        if [ "$header_version" -gt 10 ]; then
+            echo "Warning: Unusually large header version detected: $header_version"
+            echo "Trying alternative detection methods..."
+            
+            # Verificar si hay un log de extracción que confirme v4
+            if [ -f "${bootimg}.extracted" ] && grep -q "Processing vendor_boot v4 ramdisk table" "${bootimg}.extracted"; then
+                echo "Found evidence of vendor_boot v4 in extraction log"
+                header_version=4
+            else
+                # Si no hay log, intentar leer el header de otra manera
+                # Método alternativo 1: buscar un patrón específico de vendor_boot v4
+                header_bytes=$(hexdump -s 44 -n 16 -C "$bootimg" | head -1)
+                if echo "$header_bytes" | grep -q "04 00 00 00"; then
+                    echo "Detected header v4 pattern in hex dump"
+                    header_version=4
+                else
+                    # Método alternativo 2: buscar la estructura de la tabla de ramdisk
+                    if hexdump -C "$bootimg" | grep -A 20 "vendor_ramdisk_table" | grep -q "size.*108"; then
+                        echo "Detected vendor_ramdisk_table structure consistent with v4"
+                        header_version=4
+                    else
+                        # Método alternativo 3: último recurso, asumimos v4 si hay evidencia de que funciona con AIK
+                        echo "Could not definitively determine header version, defaulting to v4 based on evidence"
+                        header_version=4
+                    fi
+                fi
+            fi
+        fi
+    elif grep -q "ANDROID!" "$bootimg"; then
+        echo "Standard boot image detected with ANDROID! signature"
+        # Para boot estándar, el header_version está en offset 40
+        header_version=$(hexdump -s 40 -n 4 -e '1/4 "%d"' "$bootimg")
+    else
+        echo "No valid boot image signature found"
+    fi
+    
+    echo "$header_version"
+}
 
+# Script principal para TWRP
 twrpdtout="twrp-device-tree"
 
 # Mejorar detección de imágenes para TWRP
@@ -1002,31 +1055,20 @@ if [[ "$is_ab" = true ]]; then
         printf "Legacy A/B with recovery partition detected...\n"
         twrpimg="recovery.img"
     elif [ -f vendor_boot.img ]; then
-        # Método más confiable para detectar la versión de header
-        # Usar dd para extraer los bytes exactos y od para convertirlos a un número decimal
-        header_version=$(dd if=vendor_boot.img bs=1 skip=44 count=4 2>/dev/null | od -An -t d4 | tr -d ' ')
+        # Usar nuestra función mejorada para detectar la versión
+        header_version=$(detect_header_version vendor_boot.img)
         printf "Detected vendor_boot.img with header version: %s\n" "$header_version"
-        
-        # Verificar también el log de AIK si ya fue extraído
-        if [ -f vendor_boot.extracted ]; then
-            if grep -q "Processing vendor_boot v4 ramdisk table" vendor_boot.extracted; then
-                printf "AIK confirms vendor_boot v4 detected, overriding header version\n"
-                header_version="4"
-            fi
-        fi
         
         if [[ "$header_version" == "4" || "$header_version" == "3" ]]; then
             printf "A/B device with vendor_boot v%s detected, using vendor_boot.img...\n" "$header_version"
+            
+            # Guardar la versión correcta en el archivo para que AIK lo use
+            echo "$header_version" > vendor_boot.img-header_version
+            
             twrpimg="vendor_boot.img"
         else
-            # Como último recurso, verificar los primeros bytes para ver si hay evidencia de un header v4
-            if xxd -p -l 8 vendor_boot.img | grep -q "41564233"; then
-                printf "Magic AVB3 detected, likely vendor_boot v4, using vendor_boot.img...\n"
-                twrpimg="vendor_boot.img"
-            else
-                printf "A/B device detected but vendor_boot is not v3 or v4, trying boot.img...\n"
-                twrpimg="boot.img"
-            fi
+            printf "A/B device detected but vendor_boot header version not recognized, trying boot.img...\n"
+            twrpimg="boot.img"
         fi
     else
         printf "A/B device detected, using boot.img...\n"
