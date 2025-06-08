@@ -812,9 +812,6 @@ if [[ -f "${OUTDIR}"/dtbo.img ]]; then
 	printf "dtbo extracted\n"
 fi
 
-# Show some info
-neofetch || uname -r
-
 # Extract Partitions
 for p in $PARTITIONS; do
 	if ! echo "${p}" | grep -q "boot\|recovery\|dtbo\|vendor_boot\|tz"; then
@@ -1011,7 +1008,7 @@ else
 fi
 if [[ -f ${twrpimg} ]]; then
 	mkdir -p $twrpdtout
-	uvx --from git+https://github.com/twrpdtgen/twrpdtgen@master twrpdtgen $twrpimg -o $twrpdtout
+	uvx --from git+https://github.com/EduardoA3677/twrpdtgen@master twrpdtgen $twrpimg -o $twrpdtout
 	if [[ "$?" = 0 ]]; then
 		[[ ! -e "${OUTDIR}"/twrp-device-tree/README.md ]] && curl https://raw.githubusercontent.com/wiki/SebaUbuntu/TWRP-device-tree-generator/4.-Build-TWRP-from-source.md > ${twrpdtout}/README.md
 	fi
