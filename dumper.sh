@@ -1002,16 +1002,22 @@ if [[ "$is_ab" = true ]]; then
         printf "Legacy A/B with recovery partition detected...\n"
         twrpimg="recovery.img"
     elif [ -f vendor_boot.img ]; then
-        # Mejora en la detección del header version usando hexdump directo
-        header_version=$(hexdump -n 48 -s 44 -e '1/4 "%d"' vendor_boot.img 2>/dev/null)
+        # Verificar el header version usando dd y od para mayor precisión
+        header_version=$(dd if=vendor_boot.img bs=1 skip=44 count=4 2>/dev/null | od -An -t d4 | tr -d ' ')
         printf "Detected vendor_boot.img with header version: %s\n" "$header_version"
         
         if [[ "$header_version" == "4" || "$header_version" == "3" ]]; then
             printf "A/B device with vendor_boot v%s detected, using vendor_boot.img...\n" "$header_version"
             twrpimg="vendor_boot.img"
         else
-            printf "A/B device detected but vendor_boot is not v3 or v4, trying boot.img...\n"
-            twrpimg="boot.img"
+            # Forzar el uso de vendor_boot.img si AIK confirma que es v4
+            if grep -q "Processing vendor_boot v4 ramdisk table" vendor_boot.extracted; then
+                printf "AIK detected vendor_boot v4, using vendor_boot.img...\n"
+                twrpimg="vendor_boot.img"
+            else
+                printf "A/B device detected but vendor_boot is not v3 or v4, trying boot.img...\n"
+                twrpimg="boot.img"
+            fi
         fi
     else
         printf "A/B device detected, using boot.img...\n"
@@ -1025,10 +1031,10 @@ fi
 if [[ -f ${twrpimg} ]]; then
     mkdir -p $twrpdtout
     printf "Generating TWRP device tree using %s...\n" "$twrpimg"
-    
+
     # Mantener tu fork como solicitaste
     uvx --from git+https://github.com/EduardoA3677/twrpdtgen@master twrpdtgen $twrpimg -o $twrpdtout
-    
+
     if [[ "$?" = 0 ]]; then
         [[ ! -e "${OUTDIR}"/twrp-device-tree/README.md ]] && curl https://raw.githubusercontent.com/wiki/EduardoA3677/TWRP-device-tree-generator/4.-Build-TWRP-from-source.md > ${twrpdtout}/README.md
     fi
